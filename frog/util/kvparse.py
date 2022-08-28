@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import logging
 import regex
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 QUOTES = "\"'"
 
@@ -15,7 +18,7 @@ _kvinline_pattern = regex.compile(
             (?:            # Begin group for escaped values
               (?P<subitem> #   Begin group for subparser groups
                 {          #   Literal '{'
-                  (?R)     #   Recursively match the whole thing
+                  (?R)+?   #   Recursively match the whole thing
                 }          #   Literal '}'
               )            #   End group for subparser groups
               |            # -OR-
@@ -28,7 +31,7 @@ _kvinline_pattern = regex.compile(
               )            #  End group for quoted values
               |            # -OR-
               (?:          #  Begin group for unquoted values
-                [\S]+      #  Capture 1+ non-whitespace character
+                [\w\s,-/]+ #  Capture 1+ non-whitespace character
               )            #  End capture for unquoted values
             )              # End capture for possibly escaped values
           )                # End capture for value
@@ -60,6 +63,7 @@ def parse_many(items: List[str]) -> Dict[str, str]:
     for item in items:
         matches = _kvinline_pattern.finditer(item)
         for match in matches:
+            logger.debug(f"Parsed parameter `{item}` => `{match.groups()}`")
             kvitems.update(_unpack(*match.groups()))
 
     return dict(kvitems.items())

@@ -5,20 +5,22 @@ from typing import List
 
 from texttable import Texttable
 
+from frog.runner import ExecutionResult
 
-def as_json(results: List[dict]) -> str:
+
+def as_json(results: List[ExecutionResult]) -> str:
     out = {}
 
     for result in results:
-        out.update({result["host"].host: result["result"]})
+        out.update({result.host: result.outcome()})
 
     return json.dumps(out)
 
 
-def as_texttable(results: List[dict]) -> str:
+def as_texttable(results: List[ExecutionResult]) -> str:
     result_rows = []
     for result in results:
-        result_rows.append([result["host"].host, result["result"]])
+        result_rows.append([result.host, result.outcome()])
 
     table = Texttable()
     table.set_deco(Texttable.HEADER)
@@ -29,10 +31,10 @@ def as_texttable(results: List[dict]) -> str:
     return table.draw()
 
 
-def as_pretty_json(results: List[dict]) -> str:
+def as_pretty_json(results: List[ExecutionResult]) -> str:
     out = {}
 
     for result in results:
-        out.update({result["host"].host: result["result"]})
+        out.update({result.host: result.outcome()})
 
     return json.dumps(out, indent=2)

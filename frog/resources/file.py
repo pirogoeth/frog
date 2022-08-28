@@ -141,4 +141,4 @@ def put(*, path: str, contents: str, mode: int=0o600, owner: Optional[str]=None,
     updated.append(_update_file_mode(path=path, mode=mode))
     updated.append(_update_file_ownership(path=path, owner=owner, group=group))
 
-    return all(updated)
+    return any(updated)

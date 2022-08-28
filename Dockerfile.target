@@ -1,0 +1,9 @@
+FROM docker.io/library/python:3
+
+RUN apt update && \
+        apt dist-upgrade -y \
+            sudo+ \
+            git+ && \
+        apt clean && \
+        rm -rf /var/lib/apt/lists
+

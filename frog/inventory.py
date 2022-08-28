@@ -6,10 +6,21 @@ import dataclasses
 import io
 import json
 import pathlib
+from functools import reduce
 from itertools import chain
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Sized, Tuple
 
 import yaml
+from mitogen.core import Context
+from mitogen.master import Router
+
+from frog.util.dictser import DictSerializable
+
+from .connection import ConnectionMethod
+
+
+def default_ssh_connection_method(hostname: str) -> dict:
+    return { "type": "ssh", "hostname": hostname }
 
 
 def load(inventories: List[pathlib.Path]) -> Inventory:
@@ -34,13 +45,12 @@ def _load_file(inv_path: pathlib.Path) -> Tuple[str, dict]:
         return (inv_name, yaml.safe_load(inv_file))
 
 
-@dataclasses.dataclass
-class Inventory:
+class Inventory(DictSerializable, Sized):
     """ Represents a collection of hosts.
     """
 
-    hosts: Mapping[str, List[InventoryItem]] = dataclasses.field(default_factory=dict)
-    parent: Optional[Inventory] = dataclasses.field(default=None)
+    hosts: Mapping[str, List[InventoryItem]]
+    parent: Optional[Inventory] = None
 
     @classmethod
     def combine(cls, inventories: List[Tuple[str, dict]]) -> Inventory:
@@ -63,11 +73,20 @@ class Inventory:
         props = json.loads(data)
         return cls.fromdict(props)
 
+    def __init__(self, hosts: Optional[Mapping[str, List[InventoryItem]]], parent: Optional[Inventory]=None):
+        if hosts is None:
+            hosts = {}
+        self.hosts = hosts
+        self.parent = parent
+
     def __repr__(self) -> str:
         return f"<Inventory object, groups={list(self.hosts.keys())}>"
 
     def __iter__(self) -> Iterable[InventoryItem]:
         return chain.from_iterable(self.hosts.values())
+
+    def __len__(self) -> int:
+        return reduce(lambda acc, group: acc+len(group), self.hosts.values(), 0)
 
     def select(self, criteria: str) -> Inventory:
         subset: Dict[str, List[InventoryItem]] = {}
@@ -81,35 +100,46 @@ class Inventory:
         return Inventory(subset, parent=self)
 
     def asdict(self) -> dict:
-        return dataclasses.asdict(self)
+        return {
+            "hosts": self.hosts,
+            "parent": self.parent,
+        }
 
     def asjson(self) -> str:
-        return json.dumps(self.asdict)
+        return json.dumps(self.asdict())
 
 
-@dataclasses.dataclass
-class InventoryItem:
+class InventoryItem(DictSerializable):
     """ Represents an entry in the inventory.
     """
 
-    """ Hostname to connect to. """
+    """ Name of the host """
     host: str
 
-    """ Port to connect on. """
-    port: int = 22
+    """ Connection method used to reach the remote. """
+    _connection_method: Optional[ConnectionMethod] = None
 
-    """ Name of the host to use as a gateway. """
-    jump_via: Optional[str] = None
+    """ InventoryItem to use as a gateway. """
+    jump_via: Optional[InventoryItem] = None
 
     """ User to sudo as. """
     sudo_as: Optional[str] = "root"
 
     """ Dictionary of host facts. """
-    facts: dict = dataclasses.field(default_factory=dict)
+    facts: Optional[dict] = None
 
     @classmethod
     def fromdict(cls, data: dict) -> InventoryItem:
         return cls(**data)
+
+    def __init__(self, host: str, connection_method: dict, jump_via: Optional[InventoryItem]=None, sudo_as: Optional[str]=None, facts: Optional[dict]=None):
+        self.host = host
+        self.jump_via = jump_via
+        self.sudo_as = sudo_as or "root"
+        self.facts = facts or {}
+        if connection_method is None:
+            connection_method = default_ssh_connection_method(self.host)
+        self.connection_method = connection_method
 
     def __repr__(self) -> str:
         via = ""
@@ -118,15 +148,32 @@ class InventoryItem:
 
         sudo_as = ""
         if self.sudo_as:
-            sudo_as = f"as {self.sudo_as}"
+            sudo_as = f"sudo as {self.sudo_as}"
 
-        return f"<InventoryItem@{hex(id(self))} {self.host}:{self.port} {via} {sudo_as}>"
+        return f"<InventoryItem[{self.host}] conn={self.connection_method} {via} {sudo_as}>"
+
+    def _get_connection_method(self) -> Optional[ConnectionMethod]:
+        return self._connection_method
+
+    def _set_connection_method(self, method: dict):
+        if self._connection_method is not None:
+            raise ValueError("Connection method is already set, please don't overwrite")
+
+        self._connection_method = ConnectionMethod.load(method)
+
+    connection_method = property(_get_connection_method, _set_connection_method)
 
     def asdict(self) -> dict:
-        return dataclasses.asdict(self)
+        return {
+            "host": self.host,
+            "connection_method": self.connection_method.asdict(),
+            "jump_via": self.jump_via,
+            "sudo_as": self.sudo_as,
+            "facts": self.facts,
+        }
 
     def asjson(self) -> str:
-        return json.dumps(self.asdict)
+        return json.dumps(self.asdict())
 
     def inherits_options(self, options: dict):
         """ Performs option inheritance from the inventory file.
@@ -135,11 +182,21 @@ class InventoryItem:
         if not self.jump_via:
             self.jump_via = options.get("jump_via")
 
+    def open_connection(self, router: Router) -> Context:
+        ctx = self.connection_method.connect(router)
+        if self.sudo_as:
+            ctx = router.sudo(
+                username=self.sudo_as,
+                via=ctx,
+            )
+
+        return ctx
+
     def update_facts(self, new_facts: dict):
         """ Updates the facts we have stored with a new set of facts.
             Writes the existing facts over the new set of facts, so
             facts set by hand take precedence over gathered facts.
         """
 
-        new_facts.update(self.facts)
+        new_facts.update({} if self.facts is None else self.facts)
         self.facts = new_facts

@@ -117,12 +117,21 @@ def _run(ctx: click.Context, cookbooks: List[str], limit: str, outputter: str,
 
     formatter = pick_formatter(outputter)
     resource_params = kvparse.parse_many(parameters)
+    logger.debug(f"KVparse parsed parameters {resource_params}")
 
     inv = ctx.obj["inventory"]
 
-    _runner.gather_facts(inv, fact_cache=fact_cache)
     if limit:
+        logger.debug(f"Limiting inventory {inv.hosts} by filter `{limit}`")
         inv = inv.select(limit)
+
+    if len(inv) == 0:
+        logger.fatal(f"Inventory filter `{limit}` resulted in empty inventory")
+        return False
+
+    logger.debug(f"Executing on inventory {inv.hosts}")
+
+    _runner.gather_facts(inv, fact_cache=fact_cache)
     results = list(_runner.execute(inv, target, resource_params))
     _runner.close()
 

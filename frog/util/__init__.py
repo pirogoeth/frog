@@ -2,7 +2,7 @@
 
 import time
 
-__all__ = ["deco", "logprop", "packages"]
+__all__ = ["deco", "dictser", "kvparse", "outputs", "packages"]
 
 
 class Timer:

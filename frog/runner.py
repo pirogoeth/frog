@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
-from typing import Callable, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Mapping, Optional
 
 from mitogen.core import CallError, Context, StreamError
 from mitogen.master import Broker, Router
@@ -21,6 +21,7 @@ from frog.errors import ConnectionError
 from frog.fact_cache import FactCache, MemoryFactCache
 from frog.inventory import Inventory, InventoryItem
 from frog.remoteenv import bootstrapper
+from frog.util.dictser import DictSerializable
 
 logger = logging.getLogger(__name__)
 
@@ -63,14 +64,14 @@ class Runner:
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
 
-    def execute(self, hosts: Inventory, target: str, kw: Optional[dict]=None) -> Iterable[Result]:
+    def execute(self, hosts: Inventory, target: str, kw: Optional[dict]=None) -> Iterable[ExecutionResult]:
         if kw is None:
             kw = {}
 
-        results: Iterable[Result] = deque([])
+        results: Iterable[ExecutionResult] = deque([])
         pool = []
         for item in hosts:
-            logger.info(f"Enqueue host {item.host} to run {target}")
+            logger.info(f"Enqueue host {item.host} to run {target}({kw})")
             # Create a new local context for each of the hosts we should run on
             # TODO: Ideally, chunk this out into more reasonable, parallelizable chunks.
             child = threading.Thread(
@@ -105,16 +106,7 @@ class Runner:
             return self._connections[str(item)]
 
         try:
-            ctx = self._router.ssh(
-                hostname=item.host,
-                port=item.port,
-                python_path=["/usr/bin/env", "python3"],
-            )
-            if item.sudo_as:
-                ctx = self._router.sudo(
-                    username=item.sudo_as,
-                    via=ctx,
-                )
+            ctx = item.open_connection(self._router)
             ctx = self.into_bootstrap(ctx)
             self._connections[str(item)] = ctx
             return ctx
@@ -134,29 +126,73 @@ class Runner:
         )
 
     def execute_on_host(self, results: deque, item: InventoryItem, source: Inventory, target: str, kw: Optional[dict]=None):
+        ctx = self.get_or_create_connection(item)
+        payload_args = (
+            source.serialize(deepcopy=True),  # the inventory the host was sourced from
+            item.serialize(deepcopy=True),    # the details about the host itself
+            ctx,                              # the remote host's context
+            self._router.myself(),            # the parent/controller's context
+            target,                           # the resource function to call
+        )
+
         try:
-            ctx = self.get_or_create_connection(item)
-            results.append({
-                "host": item,
-                "result": ctx.call(
-                    context.call_with_context,  # creates a "context" module the remote can pull info from
-                    source.asdict(),            # the inventory the host was sourced from
-                    item.asdict(),              # the details about the host itself
-                    ctx,                        # the remote host's context
-                    self._router.myself(),      # the parent/controller's context
-                    target,                     # the resource function to call
-                    **kw,                       # arguments to the resource function
+            results.append(ExecutionResult.ok(
+                item.host,
+                changed=ctx.call(
+                    context.call_with_context, # creates a "context" module the remote can pull info from
+                    *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
+                    **kw,                      # arguments to the resource function
                 ),
-            })
+            ))
         except CallError as err:
             if "cannot unpickle" in str(err):
-                logger.exception(f"Error unpickling payload (target={target}, item={item})")
+                logger.exception(f"Error unpickling payload (target={target}, item={item}) (args={payload_args}, kw={kw})")
             else:
-                raise
+                results.append(ExecutionResult.fail(item.host, err))
         except Exception as err:
             logger.exception(f"Unhandled exception during call to {item}")
+            results.append(ExecutionResult.fail(item.host, err))
 
     def close(self):
         self._pool.stop()
         self._broker.shutdown()
         self._broker.join()
+
+
+class ExecutionResult(DictSerializable):
+
+    host: str
+    success: Optional[Mapping[str, Any]] = None
+    failure: Optional[Mapping[str, Any]] = None
+
+    @classmethod
+    def ok(cls, host: str, **kw) -> ExecutionResult:
+        return ExecutionResult(host, success=kw)
+
+    @classmethod
+    def fail(cls, host: str, exc: Exception) -> ExecutionResult:
+        return ExecutionResult(host, failure={
+            "exception": type(exc).__name__,
+            "repr": repr(exc),
+            "args": exc.args,
+        })
+
+    def __init__(self, host: str, success: Optional[Mapping[str, Any]]=None, failure: Optional[Mapping[str, Any]]=None):
+        if not success and not failure:
+            raise ValueError("Either `success` or `failure` is required")
+
+        self.host = host
+        self.success = success
+        self.failure = failure
+
+    def asdict(self):
+        out = {"host": self.host}
+        if self.success:
+            out["success"] = self.success
+        elif self.failure:
+            out["failure"] = self.failure
+
+        return out
+
+    def outcome(self) -> Optional[Mapping[str, Any]]:
+        return self.success or self.failure
