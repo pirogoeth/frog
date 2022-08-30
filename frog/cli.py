@@ -11,6 +11,7 @@ import click
 from texttable import Texttable
 
 from . import (
+    config,
     inventory, 
     resources,
     remoteenv,
@@ -21,30 +22,30 @@ from .util import kvparse, outputs
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BOOTSTRAP_DIRECTORY = "/opt/frog-env"
-DEFAULT_BOOTSTRAP_CLEAN = False
-DEFAULT_MITOGEN_DEBUG = False
-
 
 @click.group()
+@click.option("-c", "--config-path", type=click.Path(exists=True, dir_okay=False, readable=True, resolve_path=True), help="Path to a configuration file")
 @click.option("-i", "--inventories", type=click.Path(exists=True, dir_okay=True, readable=True, resolve_path=True), multiple=True, help="Path(s) to inventories to include")
-@click.option("--log-level", type=str, default="INFO", help="Log level, defaults to INFO")
-@click.option("--mitogen-debug/--no-mitogen-debug", type=bool, default=DEFAULT_MITOGEN_DEBUG, help="Should Mitogen debugging be turned on")
+@click.option("--log-level", type=str, default=None, help="Log level, defaults to INFO")
+@click.option("--mitogen-debug/--no-mitogen-debug", type=bool, default=None, help="Should Mitogen debugging be turned on")
 @click.pass_context
-def root(ctx: click.Context, inventories: List[str], log_level: str, mitogen_debug: bool):
+def root(ctx: click.Context, config_path: pathlib.Path, inventories: List[str], log_level: str, mitogen_debug: bool):
     """ Home-grown infrastructure management tool built with Fabric.
     """
     ctx.ensure_object(dict)
 
-    log_level = logging._nameToLevel[log_level]
+    cfg = config.Config.load(config_path)
 
-    logging.basicConfig(level=log_level, stream=sys.stdout, format="[%(levelname)s] [%(asctime)s] %(message)s")
-    if not mitogen_debug:
+    log_level = log_level or cfg.get("logging", "log level")
+    log_format = cfg.get("logging", "format", raw=True)
+    logging.basicConfig(level=logging._nameToLevel[log_level], stream=sys.stdout, format=log_format)
+    if not any([mitogen_debug, cfg.getbool("mitogen", "debug")]):
         logging.getLogger("mitogen").setLevel(logging.INFO)
 
     logger.debug(f"Load inventory from {inventories}")
 
     inv_paths = [pathlib.Path(i) for i in inventories]
+    ctx.obj["config"] = cfg
     ctx.obj["inventory"] = inventory.load(inv_paths)
 
 
@@ -88,34 +89,37 @@ def _inventory_list(ctx: click.Context):
 @root.command("run")
 @click.option("-c", "--cookbooks", type=click.Path(exists=True, dir_okay=True, file_okay=False), help="Path to directory containing cookbooks", multiple=True)
 @click.option("-l", "--limit", help="Limit hosts that should be pinged")
-@click.option("-o", "--outputter", help="Output formatter function", type=click.Choice(["table", "json", "pretty-json"]), default="json")
-@click.option("--bootstrap-directory", help="Directory the tool should be bootstrapped into", type=str, default=DEFAULT_BOOTSTRAP_DIRECTORY)
-@click.option("--bootstrap-clean", help="Whether bootstrap directory should be cleaned before bootstrapping", type=bool, default=DEFAULT_BOOTSTRAP_CLEAN)
-@click.option("--fact-cache-type", help="Type of fact cache to use", type=click.Choice(["memory", "filesystem"], case_sensitive=False), default="memory")
-@click.option("--fact-cache-dir", help="Where the facts cache should be stored", type=click.Path(exists=False, dir_okay=True, file_okay=False, writable=True, readable=True, resolve_path=True, path_type=pathlib.Path), default="/tmp/infra-facts-cache")
-@click.option("--fact-cache-lifetime", help="How long the facts cache should be considered valid", type=click.INT, default=3600)
+@click.option("-o", "--outputter", help="Output formatter function", type=click.Choice(outputs.formatters().keys()), default="json")
 @click.argument("target")
 @click.argument("parameters", nargs=-1)
 @click.pass_context
 def _run(ctx: click.Context, cookbooks: List[str], limit: str, outputter: str,
-         bootstrap_directory: str, bootstrap_clean: bool, fact_cache_type: str, fact_cache_dir: pathlib.Path,
-         fact_cache_lifetime: int, target: str, parameters: List[str]):
+         target: str, parameters: List[str]):
     """ Run the cookbook or resource on the host(s) specified.
     """
 
+    cfg = ctx.obj["config"]
+
     _runner = runner.Runner()
 
-    bootstrap_settings = remoteenv.Settings(directory=bootstrap_directory, clean=bootstrap_clean)
-    if fact_cache_type.lower() == "memory":
+    bootstrap_settings = remoteenv.Settings(
+        directory=cfg.getpath("bootstrap", "directory"),
+        clean=cfg.get("bootstrap", "clean"),
+    )
+    fact_cache_type = cfg.get("fact cache", "type").lower()
+    if fact_cache_type == "memory":
         fact_cache = MemoryFactCache()
-    elif fact_cache_type.lower() == "filesystem":
-        fact_cache = FilesystemFactCache(fact_cache_dir, fact_cache_lifetime)
+    elif fact_cache_type == "filesystem":
+        fact_cache = FilesystemFactCache(
+            cfg.getpath("fact cache", "directory"),
+            cfg.getseconds("fact cache", "lifetime"),
+        )
 
     cookbook_paths = []
     for path in cookbooks:
         cookbook_paths.append(os.path.realpath(path))
 
-    formatter = pick_formatter(outputter)
+    formatter = outputs.pick_formatter(outputter)
     resource_params = kvparse.parse_many(parameters)
     logger.debug(f"KVparse parsed parameters {resource_params}")
 
@@ -136,14 +140,3 @@ def _run(ctx: click.Context, cookbooks: List[str], limit: str, outputter: str,
     _runner.close()
 
     print(formatter(results))
-
-
-def pick_formatter(formatter: str) -> Callable[[Any], str]:
-    try:
-        return {
-            "table": outputs.as_texttable,
-            "json": outputs.as_json,
-            "pretty-json": outputs.as_pretty_json,
-        }[formatter.lower()]
-    except KeyError:
-        raise ValueError(f"Unknown formatter {formatter}")

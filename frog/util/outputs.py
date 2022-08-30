@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import json
-from typing import List
+from pprint import pformat
+from typing import Any, Callable, List, Mapping
 
 from texttable import Texttable
 
@@ -38,3 +39,23 @@ def as_pretty_json(results: List[ExecutionResult]) -> str:
         out.update({result.host: result.outcome()})
 
     return json.dumps(out, indent=2)
+
+
+def as_pprint(results: List[ExecutionResult]) -> str:
+    return pformat(results)
+
+
+def formatters() -> Mapping[str, Callable[[List[ExecutionResult]], str]]:
+    return {
+        "table": as_texttable,
+        "json": as_json,
+        "pretty-json": as_pretty_json,
+        "pprint": as_pprint,
+    }
+
+
+def pick_formatter(formatter: str) -> Callable[[Any], str]:
+    try:
+        return formatters()[formatter.lower()]
+    except KeyError:
+        raise ValueError(f"Unknown formatter {formatter}")

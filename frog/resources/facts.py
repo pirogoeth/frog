@@ -4,17 +4,18 @@ import logging
 
 from frog import context
 from frog.facts import gather as gather_host_facts
+from frog.result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
 
-def gather() -> dict:
+def gather() -> ExecutionResult:
     """ Gathers facts from the current host. """ 
 
-    return gather_host_facts()
+    return ExecutionResult.ok(facts=gather_host_facts())
 
 
-def show() -> dict:
+def show() -> ExecutionResult:
     """ Display facts for the current host. """
 
-    return context.host.facts
+    return ExecutionResult.ok(facts=context.host.facts)

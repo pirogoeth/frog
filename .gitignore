@@ -3,3 +3,4 @@ cookbooks
 inventories
 invtest
 venv
+config.ini

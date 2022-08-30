@@ -38,20 +38,20 @@ class MemoryFactCache(FactCache):
 
 class FilesystemFactCache(FactCache):
 
-    def __init__(self, directory: pathlib.Path, validity_period: int):
+    def __init__(self, directory: pathlib.Path, validity_period: timedelta):
         self._dir = directory
         self._dir.mkdir(mode=0o755, exist_ok=True)
         self._validity_period = validity_period
 
     def __repr__(self):
-        return f"<FilesystemFactCache at {self._dir} (lifetime {self._validity_period}s)>"
+        return f"<FilesystemFactCache at {self._dir} (lifetime {self._validity_period})>"
 
     def is_valid(self, cache_file: pathlib.Path):
         if not cache_file.exists():
             return False
 
         created_at = datetime.fromtimestamp(cache_file.stat().st_ctime)
-        valid_until = created_at + timedelta(seconds=self._validity_period)
+        valid_until = created_at + self._validity_period
         return datetime.now() < valid_until
 
     def get_host_cache_path(self, hostname: str) -> pathlib.Path:

@@ -20,6 +20,7 @@ from frog import context, facts, package_root
 from frog.errors import ConnectionError
 from frog.fact_cache import FactCache, MemoryFactCache
 from frog.inventory import Inventory, InventoryItem
+from frog.result import ExecutionResult
 from frog.remoteenv import bootstrapper
 from frog.util.dictser import DictSerializable
 
@@ -58,9 +59,14 @@ class Runner:
                 logger.debug(f"Host {host.host} fact cache data is invalid, updating")
 
                 subset = hosts.select(host.host)
-                result = self.execute(subset, "facts.gather").pop()
-                host = result["host"]
-                facts = result["result"]
+                # NOTE(seanj): This is where you left off. Each resource/task/???? needs to return an
+                # ExecutionResult, which gets serialized at the end of call_with_context. Now that it's back
+                # on the other side of the firebreak, it needs to be deserialized. But it's come time to implement
+                # DictSerializable's counterpart, that way we can load things and stuff from nested dictionaries.
+                #
+                # Good luck, next version of me! o/
+                result = ExecutionResult.deserialize(self.execute(subset, "facts.gather").pop())
+                facts = result.outcome()
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
 
@@ -136,63 +142,22 @@ class Runner:
         )
 
         try:
-            results.append(ExecutionResult.ok(
-                item.host,
-                changed=ctx.call(
-                    context.call_with_context, # creates a "context" module the remote can pull info from
-                    *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
-                    **kw,                      # arguments to the resource function
-                ),
+            results.append(ctx.call(
+                context.call_with_context, # creates a "context" module the remote can pull info from
+                *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
+                **kw,                      # arguments to the resource function
             ))
         except CallError as err:
             if "cannot unpickle" in str(err):
                 logger.exception(f"Error unpickling payload (target={target}, item={item}) (args={payload_args}, kw={kw})")
             else:
-                results.append(ExecutionResult.fail(item.host, err))
+                results.append(ExecutionResult.fail(err, host=item))
         except Exception as err:
             logger.exception(f"Unhandled exception during call to {item}")
-            results.append(ExecutionResult.fail(item.host, err))
+            results.append(ExecutionResult.fail(err, host=item))
 
     def close(self):
         self._pool.stop()
         self._broker.shutdown()
         self._broker.join()
 
-
-class ExecutionResult(DictSerializable):
-
-    host: str
-    success: Optional[Mapping[str, Any]] = None
-    failure: Optional[Mapping[str, Any]] = None
-
-    @classmethod
-    def ok(cls, host: str, **kw) -> ExecutionResult:
-        return ExecutionResult(host, success=kw)
-
-    @classmethod
-    def fail(cls, host: str, exc: Exception) -> ExecutionResult:
-        return ExecutionResult(host, failure={
-            "exception": type(exc).__name__,
-            "repr": repr(exc),
-            "args": exc.args,
-        })
-
-    def __init__(self, host: str, success: Optional[Mapping[str, Any]]=None, failure: Optional[Mapping[str, Any]]=None):
-        if not success and not failure:
-            raise ValueError("Either `success` or `failure` is required")
-
-        self.host = host
-        self.success = success
-        self.failure = failure
-
-    def asdict(self):
-        out = {"host": self.host}
-        if self.success:
-            out["success"] = self.success
-        elif self.failure:
-            out["failure"] = self.failure
-
-        return out
-
-    def outcome(self) -> Optional[Mapping[str, Any]]:
-        return self.success or self.failure

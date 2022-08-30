@@ -21,9 +21,13 @@ def call_with_context(_inventory: dict, _host: dict, _context: Context, _parent:
     global parent
 
     context = _context
+    parent = _parent
+    # Load the serialized versions of these into their respective classes
     host = InventoryItem.fromdict(_host)
     inventory = Inventory.fromdict(_inventory)
-    parent = _parent
 
     fn = resources.lookup(target)
-    return fn(**kw)
+    # Every target function _SHOULD_ return an ExecutionResult.
+    result = fn(**kw)
+    # Serialize the ExecutionResult on the trip back over the wire.
+    return result.serialize()
