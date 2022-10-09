@@ -14,7 +14,7 @@ import yaml
 from mitogen.core import Context
 from mitogen.master import Router
 
-from frog.util.dictser import DictSerializable
+from frog.util.dictser import DictDeserializable, DictSerializable
 
 from .connection import ConnectionMethod
 
@@ -109,7 +109,7 @@ class Inventory(DictSerializable, Sized):
         return json.dumps(self.asdict())
 
 
-class InventoryItem(DictSerializable):
+class InventoryItem(DictDeserializable, DictSerializable):
     """ Represents an entry in the inventory.
     """
 
@@ -131,6 +131,20 @@ class InventoryItem(DictSerializable):
     @classmethod
     def fromdict(cls, data: dict) -> InventoryItem:
         return cls(**data)
+
+    @classmethod
+    def deserialize(cls, data: dict) -> InventoryItem:
+        jump_via = data.pop("jump_via", None)
+        if jump_via is not None:
+            jump_via = InventoryItem.deserialize(jump_via)
+
+        return cls(
+            host=data.pop("host"),
+            connection_method=data.pop("connection_method", {}),
+            jump_via=jump_via,
+            sudo_as=data.pop("sudo_as", None),
+            facts=data.pop("facts", None),
+        )
 
     def __init__(self, host: str, connection_method: dict, jump_via: Optional[InventoryItem]=None, sudo_as: Optional[str]=None, facts: Optional[dict]=None):
         self.host = host

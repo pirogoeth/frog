@@ -32,7 +32,7 @@ class Config:
                 "clean": DEFAULT_BOOTSTRAP_CLEAN,
             },
             "mitogen": {
-                "default": DEFAULT_MITOGEN_DEBUG,
+                "debug": DEFAULT_MITOGEN_DEBUG,
             },
             "logging": {
                 "log level": DEFAULT_LOG_LEVEL,
@@ -43,8 +43,10 @@ class Config:
             }
         }
         parser.read_dict(defaults)
-        with io.open(str(from_path), "r") as cfg_file:
-            parser.read_file(cfg_file)
+
+        if from_path is not None:
+            with io.open(str(from_path), "r") as cfg_file:
+                parser.read_file(cfg_file)
 
         return cls(parser)
 

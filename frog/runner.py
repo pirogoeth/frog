@@ -21,7 +21,7 @@ from frog.errors import ConnectionError
 from frog.fact_cache import FactCache, MemoryFactCache
 from frog.inventory import Inventory, InventoryItem
 from frog.result import ExecutionResult
-from frog.remoteenv import bootstrapper
+from frog.remoteenv import Settings as BootstrapSettings, bootstrapper
 from frog.util.dictser import DictSerializable
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 class Runner:
 
-    def __init__(self):
+    def __init__(self, bootstrap_settings: Optional[BootstrapSettings]=None):
         self._broker = Broker()
         self._router = Router(broker=self._broker)
         self._connections = {}
@@ -40,7 +40,7 @@ class Runner:
         self._pool = get_or_create_pool(router=self._router)
         self._pool.add(self._file_service)
 
-        self.bootstrap_settings = None
+        self.bootstrap_settings = bootstrap_settings
         self.fact_cache = MemoryFactCache()
 
     __all__ = ["execute", "close", "gather_facts", "execute_on_host"]
@@ -59,13 +59,7 @@ class Runner:
                 logger.debug(f"Host {host.host} fact cache data is invalid, updating")
 
                 subset = hosts.select(host.host)
-                # NOTE(seanj): This is where you left off. Each resource/task/???? needs to return an
-                # ExecutionResult, which gets serialized at the end of call_with_context. Now that it's back
-                # on the other side of the firebreak, it needs to be deserialized. But it's come time to implement
-                # DictSerializable's counterpart, that way we can load things and stuff from nested dictionaries.
-                #
-                # Good luck, next version of me! o/
-                result = ExecutionResult.deserialize(self.execute(subset, "facts.gather").pop())
+                result = self.execute(subset, "facts.gather").pop()
                 facts = result.outcome()
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
@@ -142,11 +136,11 @@ class Runner:
         )
 
         try:
-            results.append(ctx.call(
+            results.append(ExecutionResult.deserialize(ctx.call(
                 context.call_with_context, # creates a "context" module the remote can pull info from
                 *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
                 **kw,                      # arguments to the resource function
-            ))
+            )))
         except CallError as err:
             if "cannot unpickle" in str(err):
                 logger.exception(f"Error unpickling payload (target={target}, item={item}) (args={payload_args}, kw={kw})")

@@ -13,7 +13,7 @@ def as_json(results: List[ExecutionResult]) -> str:
     out = {}
 
     for result in results:
-        out.update({result.host: result.outcome()})
+        out.update({result.host.host: result.outcome()})
 
     return json.dumps(out)
 
@@ -21,7 +21,7 @@ def as_json(results: List[ExecutionResult]) -> str:
 def as_texttable(results: List[ExecutionResult]) -> str:
     result_rows = []
     for result in results:
-        result_rows.append([result.host, result.outcome()])
+        result_rows.append([result.host.host, result.outcome()])
 
     table = Texttable()
     table.set_deco(Texttable.HEADER)
@@ -36,7 +36,7 @@ def as_pretty_json(results: List[ExecutionResult]) -> str:
     out = {}
 
     for result in results:
-        out.update({result.host: result.outcome()})
+        out.update({result.host.host: result.outcome()})
 
     return json.dumps(out, indent=2)
 

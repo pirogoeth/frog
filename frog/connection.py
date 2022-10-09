@@ -109,7 +109,7 @@ class DockerConnectionMethod(ConnectionMethod):
             "container": kw.pop("container", None),
             "username": kw.pop("username", None),
             "image": kw.pop("image", None),
-            "docker_path": shutil.which(kw.pop("docker_path", self.DEFAULT_DOCKER_PATH)),
+            "docker_path": shutil.which(kw.pop("docker_path", None) or self.DEFAULT_DOCKER_PATH),
         })
 
     def __repr__(self) -> str:
@@ -130,7 +130,7 @@ class PodmanConnectionMethod(DockerConnectionMethod):
     def __init__(self, /, **kw):
         super().__init__(**kw)
         self.options.update({
-            "docker_path": shutil.which(kw.pop("podman_path", self.DEFAULT_PODMAN_PATH)),
+            "docker_path": shutil.which(kw.pop("podman_path", None) or self.DEFAULT_PODMAN_PATH),
         })
 
     def __repr__(self) -> str:

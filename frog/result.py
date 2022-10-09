@@ -6,10 +6,10 @@ from typing import Any, Mapping, Optional
 
 from frog import context
 from frog.inventory import InventoryItem
-from frog.util.dictser import DictSerializable
+from frog.util.dictser import DictDeserializable, DictSerializable
 
 
-class ExecutionResult(DictSerializable):
+class ExecutionResult(DictSerializable, DictDeserializable):
     """ ExecutionResult is the result of an execution of a resource or cookbook.
         These results should be returned by each function and can be as descriptive
         as the bottom-level resource or cookbook wishes to be, as long as a success or a fail
@@ -40,6 +40,14 @@ class ExecutionResult(DictSerializable):
             },
             **kw
         ))
+
+    @classmethod
+    def deserialize(cls, data: dict) -> ExecutionResult:
+        return cls(
+            host=InventoryItem.deserialize(data["host"]),
+            success=data.pop("success", {}),
+            failure=data.pop("failure", {}),
+        )
 
     def __init__(self, host: InventoryItem, success: Optional[Mapping[str, Any]]=None, failure: Optional[Mapping[str, Any]]=None):
         if not success and not failure:

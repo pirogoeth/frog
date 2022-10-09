@@ -7,6 +7,7 @@ import sys
 from itertools import chain, zip_longest
 from typing import Any, Callable, List
 
+import better_exceptions  # noqa: F401
 import click
 from texttable import Texttable
 
