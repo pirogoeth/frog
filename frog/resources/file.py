@@ -11,6 +11,7 @@ from typing import Optional, Union
 from mitogen.service import FileService
 
 from frog.inventory import InventoryItem
+from frog.result import ExecutionResult
 
 logger = logging.getLogger(__name__)
 

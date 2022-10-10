@@ -50,7 +50,7 @@ class ExecutionResult(DictSerializable, DictDeserializable):
         )
 
     def __init__(self, host: InventoryItem, success: Optional[Mapping[str, Any]]=None, failure: Optional[Mapping[str, Any]]=None):
-        if not success and not failure:
+        if not any((success, failure,)):
             raise ValueError("Either `success` or `failure` is required")
 
         self._host = host

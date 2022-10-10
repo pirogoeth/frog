@@ -7,6 +7,7 @@ from mitogen.core import Context
 
 from frog import resources
 from frog.inventory import Inventory, InventoryItem
+from frog.result import ExecutionResult
 
 context: Context = None
 host: InventoryItem = None
@@ -27,7 +28,10 @@ def call_with_context(_inventory: dict, _host: dict, _context: Context, _parent:
     inventory = Inventory.fromdict(_inventory)
 
     fn = resources.lookup(target)
-    # Every target function _SHOULD_ return an ExecutionResult.
-    result = fn(**kw)
-    # Serialize the ExecutionResult on the trip back over the wire.
-    return result.serialize()
+    try:
+        # Grab the raw result from whatever target resource.
+        # If it's a regular return, wrap it into ExecutionResult.ok
+        # and move on with life. Otherwise, wrap it in ExecutionResult.err
+        return ExecutionResult.ok(result=fn(**kw)).serialize()
+    except Exception as err:
+        return ExecutionResult.fail(err).serialize()

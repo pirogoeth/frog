@@ -10,4 +10,4 @@ def ping(*, message: str="pong") -> str:
     """ Dumb ping on a host.
     """
 
-    return ExecutionResult.ok(message=message)
+    return message

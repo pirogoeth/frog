@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 def gather() -> ExecutionResult:
     """ Gathers facts from the current host. """ 
 
-    return ExecutionResult.ok(facts=gather_host_facts())
+    return gather_host_facts()
 
 
 def show() -> ExecutionResult:
     """ Display facts for the current host. """
 
-    return ExecutionResult.ok(facts=context.host.facts)
+    return context.host.facts
