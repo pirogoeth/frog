@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from pprint import pformat
 from typing import Any, Callable, Iterable, List, Mapping, Optional
 
 from mitogen.core import CallError, Context, StreamError
@@ -20,7 +21,8 @@ from frog import context, facts, package_root
 from frog.errors import ConnectionError
 from frog.fact_cache import FactCache, MemoryFactCache
 from frog.inventory import Inventory, InventoryItem
-from frog.remoteenv import bootstrapper
+from frog.result import ExecutionResult
+from frog.remoteenv import Settings as BootstrapSettings, bootstrapper
 from frog.util.dictser import DictSerializable
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 class Runner:
 
-    def __init__(self):
+    def __init__(self, bootstrap_settings: Optional[BootstrapSettings]=None):
         self._broker = Broker()
         self._router = Router(broker=self._broker)
         self._connections = {}
@@ -39,10 +41,8 @@ class Runner:
         self._pool = get_or_create_pool(router=self._router)
         self._pool.add(self._file_service)
 
-        self.bootstrap_settings = None
+        self.bootstrap_settings = bootstrap_settings
         self.fact_cache = MemoryFactCache()
-
-    __all__ = ["execute", "close", "gather_facts", "execute_on_host"]
 
     def register_fs_prefix(self, prefix: str):
         self._file_service.register_prefix(prefix)
@@ -58,9 +58,8 @@ class Runner:
                 logger.debug(f"Host {host.host} fact cache data is invalid, updating")
 
                 subset = hosts.select(host.host)
-                result = self.execute(subset, "facts.gather").pop()
-                host = result["host"]
-                facts = result["result"]
+                result = self.execute_one(host, "facts.gather")
+                facts = result.outcome()
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
 
@@ -97,9 +96,55 @@ class Runner:
                     done_idxs.append(idx)
 
             for idx in reversed(done_idxs):
-                pool.pop(idx)
+                try:
+                    pool.pop(idx)
+                except IndexError:
+                    # Thread completed BUT there was no result. Skip this index?
+                    pass
 
         return results
+
+    def execute_one(self, host: InventoryItem, target: str, kw: Optional[dict]=None) -> Optional[ExecutionResult]:
+        if kw is None:
+            kw = {}
+
+        # We still need a thread-safe place to put a result.
+        # We'll just handle extracting the result from the deque
+        # after the runner is joined.
+        results = deque([])
+
+        logger.info(f"Enqueue host {host.host} to run {target}({kw})")
+        # Create a new local context for each of the hosts we should run on
+        # TODO: Ideally, chunk this out into more reasonable, parallelizable chunks.
+        child = threading.Thread(
+            name=f"runner[{host.host}]",
+            daemon=True,
+            target=self.execute_on_host,
+            args=(results, host, host.parent, target),
+            kwargs={"kw": kw},
+        )
+        child.start()
+
+        while True:
+            child.join(timeout=1)
+            if not child.is_alive():
+                continue
+
+            if len(results) == 0:
+                # There must've been an error. Handle better?
+                logger.warning(f"There were no results from remote execution of {target}({kw}) on {host.host}")
+                return ExecutionResult.fail(Exception("An error occurred during execution"), host)
+            elif len(results) == 1:
+                return results.pop()
+            else:
+                raise RuntimeError(
+                    "An unexpected number of results were available after execution of"
+                    f"{target}({kw}) on {host.host}: {len(results)} were available.\n"
+                    f"Results queue contents: {pformat(results)}"
+                )
+
+        return None
+
 
     def get_or_create_connection(self, item: InventoryItem) -> Context:
         if str(item) in self._connections:
@@ -136,63 +181,22 @@ class Runner:
         )
 
         try:
-            results.append(ExecutionResult.ok(
-                item.host,
-                changed=ctx.call(
-                    context.call_with_context, # creates a "context" module the remote can pull info from
-                    *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
-                    **kw,                      # arguments to the resource function
-                ),
-            ))
+            results.append(ExecutionResult.deserialize(ctx.call(
+                context.call_with_context, # creates a "context" module the remote can pull info from
+                *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
+                **kw,                      # arguments to the resource function
+            )))
         except CallError as err:
             if "cannot unpickle" in str(err):
                 logger.exception(f"Error unpickling payload (target={target}, item={item}) (args={payload_args}, kw={kw})")
             else:
-                results.append(ExecutionResult.fail(item.host, err))
+                results.append(ExecutionResult.fail(err, host=item))
         except Exception as err:
             logger.exception(f"Unhandled exception during call to {item}")
-            results.append(ExecutionResult.fail(item.host, err))
+            results.append(ExecutionResult.fail(err, host=item))
 
     def close(self):
         self._pool.stop()
         self._broker.shutdown()
         self._broker.join()
 
-
-class ExecutionResult(DictSerializable):
-
-    host: str
-    success: Optional[Mapping[str, Any]] = None
-    failure: Optional[Mapping[str, Any]] = None
-
-    @classmethod
-    def ok(cls, host: str, **kw) -> ExecutionResult:
-        return ExecutionResult(host, success=kw)
-
-    @classmethod
-    def fail(cls, host: str, exc: Exception) -> ExecutionResult:
-        return ExecutionResult(host, failure={
-            "exception": type(exc).__name__,
-            "repr": repr(exc),
-            "args": exc.args,
-        })
-
-    def __init__(self, host: str, success: Optional[Mapping[str, Any]]=None, failure: Optional[Mapping[str, Any]]=None):
-        if not success and not failure:
-            raise ValueError("Either `success` or `failure` is required")
-
-        self.host = host
-        self.success = success
-        self.failure = failure
-
-    def asdict(self):
-        out = {"host": self.host}
-        if self.success:
-            out["success"] = self.success
-        elif self.failure:
-            out["failure"] = self.failure
-
-        return out
-
-    def outcome(self) -> Optional[Mapping[str, Any]]:
-        return self.success or self.failure

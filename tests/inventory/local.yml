@@ -3,13 +3,13 @@
 hosts:
 - host: test-container-0
   connection_method:
-    type: podman
+    type: docker
     options:
       container: "test-container-0"
       python_path: /usr/local/bin/python3
 - host: fresh-container-0
   connection_method:
-    type: podman
+    type: docker
     options:
       image: "frog-python:latest"
       python_path: /usr/local/bin/python3

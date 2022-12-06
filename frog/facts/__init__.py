@@ -9,11 +9,12 @@ from frog.facts import (
     host_meta,
     network,
     platform,
+    tailscale
 )
 from frog.util import Timer
 
 logger = logging.getLogger(__name__)
-_modules = [host_meta, network, platform]
+_modules = [host_meta, network, platform, tailscale]
 
 
 def gather() -> dict:
@@ -28,7 +29,9 @@ def gather() -> dict:
             fs = [executor.submit(mod.gather) for mod in _modules]
 
         for gathered in concurrent.futures.as_completed(fs):
-            data.update(gathered.result())
+            facts = gathered.result()
+            if facts is not None:
+                data.update(facts)
 
     logger.debug(f"Done fact gathering on {context.host.host}, took {timer.time_taken}s")
 

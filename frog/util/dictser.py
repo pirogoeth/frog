@@ -5,7 +5,9 @@ import builtins
 import copy
 import inspect
 import types
-from typing import Any, Collection, Container, Dict, Iterable, List, Optional
+from typing import Any, Collection, Container, Dict, Generic, Iterable, List, Optional, TypeVar
+
+DT = TypeVar("DT")
 
 
 def value_type_is_builtin(value: Any) -> bool:
@@ -104,3 +106,29 @@ def serialize_recursively(item: Any, path_hints: Optional[List[str]]=None) -> An
         raise TypeError(f"Type {type(item)} unserializable at {'.'.join(path_hints)}")
 
     return item
+
+
+class DictDeserializable(Generic[DT], metaclass=abc.ABCMeta):
+    """ Chaotic counterpart to DictSerializable.
+        Any object that expects to travel back and forth over the wire
+        should implement this class. 
+
+        The implementer _must_ have knowledge of the type a member is
+        expected to be when deserialization occurs. If the member is
+        a non-string, non-DictDeserializable type, the implementer is
+        expected to handle the coercion of the member from string into
+        the proper type.
+
+        Real fancy way of saying, "fucken do it yerself", eh?
+    """
+
+    @abc.abstractclassmethod
+    def deserialize(cls, data: dict) -> DT:
+        """ deserialize should take all relevant items out of `data`
+            and set them on a new instance of `cls`.
+
+            It is up to the deserializer's implementation to throw
+            if any unsupported or extra items are provided.
+        """
+
+        raise NotImplemented
