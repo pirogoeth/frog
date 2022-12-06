@@ -14,16 +14,15 @@ import yaml
 from mitogen.core import Context
 from mitogen.master import Router
 
+from frog.util import yamlext
 from frog.util.dictser import DictDeserializable, DictSerializable
 
-from .connection import ConnectionMethod
-
-
-def default_ssh_connection_method(hostname: str) -> dict:
-    return { "type": "ssh", "hostname": hostname }
+from .connection import ConnectionMethod, SshConnectionMethod
 
 
 def load(inventories: List[pathlib.Path]) -> Inventory:
+    yamlext.register()
+
     loaded = []
     while len(inventories) > 0:
         inv_path = inventories.pop(0)
@@ -66,7 +65,12 @@ class Inventory(DictSerializable, Sized):
 
     @classmethod
     def fromdict(cls, data: dict) -> Inventory:
-        return cls(**data)
+        hosts = {}
+        for key, items in data.get("hosts", {}).items():
+            hosts.setdefault(key, [])
+            for item in items:
+                hosts[key].append(InventoryItem.fromdict(item))
+        return cls(hosts, parent=data.get("parent"))
 
     @classmethod
     def fromjson(cls, data: str) -> Inventory:
@@ -78,6 +82,9 @@ class Inventory(DictSerializable, Sized):
             hosts = {}
         self.hosts = hosts
         self.parent = parent
+
+        for host in chain.from_iterable(self.hosts.values()):
+            host.parent = self
 
     def __repr__(self) -> str:
         return f"<Inventory object, groups={list(self.hosts.keys())}>"
@@ -98,6 +105,17 @@ class Inventory(DictSerializable, Sized):
                     subset[group].append(item)
 
         return Inventory(subset, parent=self)
+
+    def resolve_tags(self) -> Inventory:
+        """ Returns a new Inventory after calling `resolve_tags` on all InventoryItems. """
+
+        resolved: Dict[str, List[InventoryItem]] = {}
+        for group, items in self.hosts.items():
+            resolved.setdefault(group, [])
+            for item in items:
+                resolved[group].append(item.resolve_tags())
+
+        return Inventory(resolved, parent=self)
 
     def asdict(self) -> dict:
         return {
@@ -122,11 +140,17 @@ class InventoryItem(DictDeserializable, DictSerializable):
     """ InventoryItem to use as a gateway. """
     jump_via: Optional[InventoryItem] = None
 
-    """ User to sudo as. """
-    sudo_as: Optional[str] = "root"
+    """ Whether we should try to sudo. Default true. """
+    should_sudo: bool = True
+
+    """ Sudo options. """
+    sudo_options: Optional[dict] = None
 
     """ Dictionary of host facts. """
     facts: Optional[dict] = None
+
+    """ Inventory object that "owns" this InventoryItem. """
+    parent: Optional[InventoryItem] = None
 
     @classmethod
     def fromdict(cls, data: dict) -> InventoryItem:
@@ -142,17 +166,20 @@ class InventoryItem(DictDeserializable, DictSerializable):
             host=data.pop("host"),
             connection_method=data.pop("connection_method", {}),
             jump_via=jump_via,
-            sudo_as=data.pop("sudo_as", None),
+            should_sudo=data.pop("should_sudo", True),
+            sudo_options=data.pop("sudo_options", None),
             facts=data.pop("facts", None),
         )
 
-    def __init__(self, host: str, connection_method: dict, jump_via: Optional[InventoryItem]=None, sudo_as: Optional[str]=None, facts: Optional[dict]=None):
+    def __init__(self, host: str, connection_method: Optional[dict]=None, jump_via: Optional[InventoryItem]=None,
+                 should_sudo: bool=True, sudo_options: Optional[dict]=None, facts: Optional[dict]=None):
         self.host = host
         self.jump_via = jump_via
-        self.sudo_as = sudo_as or "root"
+        self.should_sudo = should_sudo
+        self.sudo_options = sudo_options or {"username": "root"}
         self.facts = facts or {}
         if connection_method is None:
-            connection_method = default_ssh_connection_method(self.host)
+            connection_method = SshConnectionMethod.default(self.host)
         self.connection_method = connection_method
 
     def __repr__(self) -> str:
@@ -161,8 +188,10 @@ class InventoryItem(DictDeserializable, DictSerializable):
             via = f"via {self.jump_via}"
 
         sudo_as = ""
-        if self.sudo_as:
-            sudo_as = f"sudo as {self.sudo_as}"
+        if self.sudo_options:
+            sudo_username = self.sudo_options.get("username")
+            if sudo_username is not None:
+                sudo_as = f"sudo as {sudo_username}"
 
         return f"<InventoryItem[{self.host}] conn={self.connection_method} {via} {sudo_as}>"
 
@@ -182,7 +211,8 @@ class InventoryItem(DictDeserializable, DictSerializable):
             "host": self.host,
             "connection_method": self.connection_method.asdict(),
             "jump_via": self.jump_via,
-            "sudo_as": self.sudo_as,
+            "should_sudo": self.should_sudo,
+            "sudo_options": self.sudo_options,
             "facts": self.facts,
         }
 
@@ -198,10 +228,10 @@ class InventoryItem(DictDeserializable, DictSerializable):
 
     def open_connection(self, router: Router) -> Context:
         ctx = self.connection_method.connect(router)
-        if self.sudo_as:
+        if self.should_sudo:
             ctx = router.sudo(
-                username=self.sudo_as,
                 via=ctx,
+                **self.sudo_options,
             )
 
         return ctx
@@ -214,3 +244,9 @@ class InventoryItem(DictDeserializable, DictSerializable):
 
         new_facts.update({} if self.facts is None else self.facts)
         self.facts = new_facts
+
+    def resolve_tags(self) -> InventoryItem:
+        """ Returns a copy of this InventoryItem with all YAML extension tags resolved. """
+
+        resolved = yamlext.resolve_nested_tags(self.asdict())
+        return self.fromdict(resolved)

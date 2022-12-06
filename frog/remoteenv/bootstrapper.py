@@ -36,8 +36,10 @@ def bootstrap(from_ctx: Context, settings: Optional[Settings]=None) -> str:
 
     # So... for some reason, Mitogen(!?) modifies sys._base_executable which breaks venv.
     # Set it to sys.executable temporarily.
-    _orig_base_executable = sys._base_executable
-    sys._base_executable = sys.executable
+    _orig_base_executable = None
+    if "_base_executable" in dir(sys):
+        _orig_base_executable = sys._base_executable
+        sys._base_executable = sys.executable
 
     base_dir = pathlib.Path(settings.directory)
     venv.create(
@@ -48,7 +50,8 @@ def bootstrap(from_ctx: Context, settings: Optional[Settings]=None) -> str:
     )
 
     # Restore _base_executable
-    sys._base_executable = _orig_base_executable
+    if _orig_base_executable is not None:
+        sys._base_executable = _orig_base_executable
 
     # Fetch the requirements.txt into the remote environment
     requirements_path = str(base_dir / "requirements.txt")

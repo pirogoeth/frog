@@ -42,7 +42,7 @@ def as_pretty_json(results: List[ExecutionResult]) -> str:
 
 
 def as_pprint(results: List[ExecutionResult]) -> str:
-    return pformat(results)
+    return pformat([result.asdict() for result in results])
 
 
 def formatters() -> Mapping[str, Callable[[List[ExecutionResult]], str]]:

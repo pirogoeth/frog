@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 from collections import deque
+from pprint import pformat
 from typing import Any, Callable, Iterable, List, Mapping, Optional
 
 from mitogen.core import CallError, Context, StreamError
@@ -43,8 +44,6 @@ class Runner:
         self.bootstrap_settings = bootstrap_settings
         self.fact_cache = MemoryFactCache()
 
-    __all__ = ["execute", "close", "gather_facts", "execute_on_host"]
-
     def register_fs_prefix(self, prefix: str):
         self._file_service.register_prefix(prefix)
 
@@ -59,7 +58,7 @@ class Runner:
                 logger.debug(f"Host {host.host} fact cache data is invalid, updating")
 
                 subset = hosts.select(host.host)
-                result = self.execute(subset, "facts.gather").pop()
+                result = self.execute_one(host, "facts.gather")
                 facts = result.outcome()
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
@@ -97,9 +96,55 @@ class Runner:
                     done_idxs.append(idx)
 
             for idx in reversed(done_idxs):
-                pool.pop(idx)
+                try:
+                    pool.pop(idx)
+                except IndexError:
+                    # Thread completed BUT there was no result. Skip this index?
+                    pass
 
         return results
+
+    def execute_one(self, host: InventoryItem, target: str, kw: Optional[dict]=None) -> Optional[ExecutionResult]:
+        if kw is None:
+            kw = {}
+
+        # We still need a thread-safe place to put a result.
+        # We'll just handle extracting the result from the deque
+        # after the runner is joined.
+        results = deque([])
+
+        logger.info(f"Enqueue host {host.host} to run {target}({kw})")
+        # Create a new local context for each of the hosts we should run on
+        # TODO: Ideally, chunk this out into more reasonable, parallelizable chunks.
+        child = threading.Thread(
+            name=f"runner[{host.host}]",
+            daemon=True,
+            target=self.execute_on_host,
+            args=(results, host, host.parent, target),
+            kwargs={"kw": kw},
+        )
+        child.start()
+
+        while True:
+            child.join(timeout=1)
+            if not child.is_alive():
+                continue
+
+            if len(results) == 0:
+                # There must've been an error. Handle better?
+                logger.warning(f"There were no results from remote execution of {target}({kw}) on {host.host}")
+                return ExecutionResult.fail(Exception("An error occurred during execution"), host)
+            elif len(results) == 1:
+                return results.pop()
+            else:
+                raise RuntimeError(
+                    "An unexpected number of results were available after execution of"
+                    f"{target}({kw}) on {host.host}: {len(results)} were available.\n"
+                    f"Results queue contents: {pformat(results)}"
+                )
+
+        return None
+
 
     def get_or_create_connection(self, item: InventoryItem) -> Context:
         if str(item) in self._connections:

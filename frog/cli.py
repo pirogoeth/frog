@@ -134,6 +134,9 @@ def _run(ctx: click.Context, cookbooks: List[str], limit: str, outputter: str,
         logger.fatal(f"Inventory filter `{limit}` resulted in empty inventory")
         return False
 
+    logger.debug("Resolving inventory tags")
+    inv = inv.resolve_tags()
+
     logger.debug(f"Executing on inventory {inv.hosts}")
 
     _runner.gather_facts(inv, fact_cache=fact_cache)

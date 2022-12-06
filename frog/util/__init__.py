@@ -2,7 +2,7 @@
 
 import time
 
-__all__ = ["deco", "dictser", "kvparse", "outputs", "packages"]
+__all__ = ["deco", "dictser", "kvparse", "outputs", "packages", "yamlext"]
 
 
 class Timer:

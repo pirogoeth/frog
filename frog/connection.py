@@ -6,7 +6,7 @@ import abc
 import json
 import logging
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from mitogen.core import Context
 from mitogen.master import Router
@@ -23,7 +23,10 @@ class ConnectionMethod(DictSerializable, metaclass=abc.ABCMeta):
     DEFAULT_PYTHON_PATH = ["/usr/bin/env", "python3"]
 
     @classmethod
-    def load(cls, connection_method: dict) -> ConnectionMethod:
+    def load(cls, connection_method: Union[dict, ConnectionMethod]) -> ConnectionMethod:
+        if isinstance(connection_method, cls):
+            return connection_method
+
         what = connection_method.pop("type", "ssh").lower()
         method = CONNECTION_METHOD_MAP.get(what)
         if method is None:
@@ -31,7 +34,7 @@ class ConnectionMethod(DictSerializable, metaclass=abc.ABCMeta):
 
         return method(**connection_method.pop("options", {}))
 
-    def __init__(self, /, **kw):
+    def __init__(self, **kw):
         self.options = {
             "remote_name": kw.pop("remote_name", None),
             "python_path": kw.pop("python_path", self.DEFAULT_PYTHON_PATH),
@@ -72,13 +75,17 @@ class SshConnectionMethod(ConnectionMethod):
 
     TYPE = "ssh"
 
+    @classmethod
+    def default(cls, host: str) -> SshConnectionMethod:
+        return cls(hostname=host)
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.options.update({
-            "hostname": kw.pop("hostname"),
+            "hostname": kw.pop("hostname", None),
             "username": kw.pop("username", None),
             "ssh_path": kw.pop("ssh_path", "ssh"),
-            "ssh_args": kw.pop("ssh_args", []),
+            "ssh_args": kw.pop("ssh_args", None),
             "port": kw.pop("port", None),
             "check_host_keys": kw.pop("check_host_keys", "enforce"),
             "password": kw.pop("password", None),
@@ -103,7 +110,7 @@ class DockerConnectionMethod(ConnectionMethod):
     DEFAULT_DOCKER_PATH = "docker"
     TYPE = "docker"
 
-    def __init__(self, /, **kw):
+    def __init__(self, **kw):
         super().__init__(**kw)
         self.options.update({
             "container": kw.pop("container", None),
@@ -127,7 +134,7 @@ class PodmanConnectionMethod(DockerConnectionMethod):
     DEFAULT_PODMAN_PATH = "podman"
     TYPE = "podman"
 
-    def __init__(self, /, **kw):
+    def __init__(self, **kw):
         super().__init__(**kw)
         self.options.update({
             "docker_path": shutil.which(kw.pop("podman_path", None) or self.DEFAULT_PODMAN_PATH),
