@@ -11,11 +11,12 @@ from typing import Optional, Union
 from mitogen.service import FileService
 
 from frog.inventory import InventoryItem
-from frog.result import ExecutionResult
+from frog.execution import ExecutionResult, thunk
 
 logger = logging.getLogger(__name__)
 
 
+@thunk
 def exists(*, path: str) -> bool:
     """ Returns a boolean of whether a file/directory exists on disk.
     """
@@ -23,6 +24,7 @@ def exists(*, path: str) -> bool:
     return os.path.exists(path)
 
 
+@thunk
 def file_exists(*, path: str) -> bool:
     """ Returns whether a file exists on disk and is a file.
     """
@@ -30,6 +32,7 @@ def file_exists(*, path: str) -> bool:
     return os.path.isfile(path)
 
 
+@thunk
 def dir_exists(*, path: str) -> bool:
     """ Returns whether a directory exists on disk and is a directory.
     """
@@ -37,6 +40,7 @@ def dir_exists(*, path: str) -> bool:
     return os.path.isdir(path)
 
 
+@thunk
 def stat(*, path: str, follow_symlinks: bool=False) -> dict:
     """ Returns a stat structure for a file or directory.
     """
@@ -48,6 +52,7 @@ def stat(*, path: str, follow_symlinks: bool=False) -> dict:
     return dict(zip(fields, values))
 
 
+@thunk
 def mkdirs(*, path: str, create_mode: int=0o750, exist_ok: bool=False):
     """ Makes a directory and all parent directories leading to it.
     """
@@ -55,6 +60,7 @@ def mkdirs(*, path: str, create_mode: int=0o750, exist_ok: bool=False):
     return os.makedirs(path, mode=create_mode, exist_ok=exist_ok)
 
 
+@thunk
 def touch(*, path: str, create_mode: int=0o640, exist_ok: bool=True, update_create_time: Optional[int]=None):
     """ Creates a file at the specified path.
     """
@@ -104,6 +110,7 @@ def _update_file_ownership(*, path: str, owner: Union[int, str], group: Union[in
     return False
 
 
+@thunk
 def get_contents(*, path: str):
     """ Returns the contents of the file at `path`.
     """
@@ -112,6 +119,7 @@ def get_contents(*, path: str):
         return f.read()
 
 
+@thunk
 def put(*, path: str, contents: str, mode: int=0o600, owner: Optional[str]=None, group: Optional[str]=None, overwrite: bool=False, encoding: Optional[str]=None):
     """ Places contents onto the remote at path.
     """

@@ -7,7 +7,7 @@ from mitogen.core import Context
 
 from frog import resources
 from frog.inventory import Inventory, InventoryItem
-from frog.result import ExecutionResult
+from frog.execution import ExecutionResult
 
 context: Context = None
 host: InventoryItem = None
@@ -27,11 +27,12 @@ def call_with_context(_inventory: dict, _host: dict, _context: Context, _parent:
     host = InventoryItem.fromdict(_host)
     inventory = Inventory.fromdict(_inventory)
 
-    fn = resources.lookup(target)
+    # Someday, this will need to resolve cookbooks/other things instead of
+    # just single resource targets, which is where things will get really
+    # interesting, since cookbooks are going to be serieses of ExecutionThunks
+    # that need to be resolved.
+    thunk = (resources.lookup(target))(**kw)
     try:
-        # Grab the raw result from whatever target resource.
-        # If it's a regular return, wrap it into ExecutionResult.ok
-        # and move on with life. Otherwise, wrap it in ExecutionResult.err
-        return ExecutionResult.ok(result=fn(**kw)).serialize()
+        return thunk.execute().serialize()
     except Exception as err:
         return ExecutionResult.fail(err).serialize()

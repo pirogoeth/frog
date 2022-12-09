@@ -22,7 +22,7 @@ _hostname_regex = re.compile(r"""
 logger = logging.getLogger(__name__)
 
 
-def _data_from_name(hostname: str):
+def _data_from_name(hostname: str) -> dict:
     """ Parses out name to variables
     """
 

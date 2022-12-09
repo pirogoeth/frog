@@ -21,9 +21,8 @@ from frog import context, facts, package_root
 from frog.errors import ConnectionError
 from frog.fact_cache import FactCache, MemoryFactCache
 from frog.inventory import Inventory, InventoryItem
-from frog.result import ExecutionResult
+from frog.execution import ExecutionResult, ResultChain
 from frog.remoteenv import Settings as BootstrapSettings, bootstrapper
-from frog.util.dictser import DictSerializable
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +56,8 @@ class Runner:
             except FactCache.NeedsUpdate:
                 logger.debug(f"Host {host.host} fact cache data is invalid, updating")
 
-                subset = hosts.select(host.host)
                 result = self.execute_one(host, "facts.gather")
-                facts = result.outcome()
+                facts = result.unwrap()
                 host.update_facts(facts)
                 _fact_cache.update(host.host, facts)
 
@@ -145,7 +143,6 @@ class Runner:
 
         return None
 
-
     def get_or_create_connection(self, item: InventoryItem) -> Context:
         if str(item) in self._connections:
             return self._connections[str(item)]
@@ -181,7 +178,7 @@ class Runner:
         )
 
         try:
-            results.append(ExecutionResult.deserialize(ctx.call(
+            results.append(ResultChain.deserialize(ctx.call(
                 context.call_with_context, # creates a "context" module the remote can pull info from
                 *payload_args,             # arguments specifically describing the where, whomst'd've, and what of the call
                 **kw,                      # arguments to the resource function
