@@ -101,12 +101,12 @@ def _run(ctx: click.Context, cookbooks: List[str], limit: str, outputter: str,
 
     cfg = ctx.obj["config"]
 
-    _runner = runner.Runner()
-
     bootstrap_settings = remoteenv.Settings(
         directory=cfg.getpath("bootstrap", "directory"),
         clean=cfg.get("bootstrap", "clean"),
     )
+    _runner = runner.Runner(bootstrap_settings=bootstrap_settings)
+
     fact_cache_type = cfg.get("fact cache", "type").lower()
     if fact_cache_type == "memory":
         fact_cache = MemoryFactCache()

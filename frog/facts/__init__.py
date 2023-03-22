@@ -5,6 +5,7 @@ import logging
 import os
 
 from frog import context
+from frog.execution import ExecutionResult
 from frog.facts import (
     host_meta,
     network,
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 _modules = [host_meta, network, platform, tailscale]
 
 
-def gather() -> dict:
+def gather() -> ExecutionResult:
     """ Gathers all facts for a host and returns a meta dictionary. """
 
     data = {}
@@ -35,4 +36,4 @@ def gather() -> dict:
 
     logger.debug(f"Done fact gathering on {context.host.host}, took {timer.time_taken}s")
 
-    return data
+    return ExecutionResult.ok(facts=data)

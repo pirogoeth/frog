@@ -4,6 +4,7 @@ import abc
 import builtins
 import copy
 import inspect
+import json
 import types
 from typing import Any, Collection, Container, Dict, Generic, Iterable, List, Optional, TypeVar
 
@@ -73,6 +74,16 @@ class DictSerializable(metaclass=abc.ABCMeta):
             this_dict[member] = serialize_recursively(this_dict[member], path_hints=[member])
 
         return this_dict
+
+
+class DictSerEncoder(json.JSONEncoder):
+    """ Makes `DictSerializable` objects JSON-encodable """
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, DictSerializable):
+            return obj.serialize(deepcopy=True)
+        else:
+            return super(self).default(obj)
 
 
 def serialize_recursively(item: Any, path_hints: Optional[List[str]]=None) -> Any:

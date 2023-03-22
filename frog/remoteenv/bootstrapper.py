@@ -13,26 +13,43 @@ from typing import Optional
 from mitogen.core import Context, Router
 from mitogen.service import FileService
 
+from frog.util.dictser import DictDeserializable, DictSerializable, serialize_recursively
+
 logger = logging.getLogger(__name__)
 
 
-class Settings:
+class Settings(DictDeserializable, DictSerializable):
     def __init__(
         self,
-        directory: str="/opt/infra-env",
+        directory: Optional[pathlib.Path]=None,
         clean: bool=False,
     ):
+        if directory is None:
+            directory = pathlib.Path("/opt/frog-env")
+
         self.directory = directory
         self.clean = clean
 
+    def asdict(self) -> dict:
+        return {
+            "directory": str(self.directory),
+            "clean": self.clean,
+        }
 
-def bootstrap(from_ctx: Context, settings: Optional[Settings]=None) -> str:
+    @classmethod
+    def deserialize(cls, data: dict):
+        return cls(
+            directory=pathlib.Path(data["directory"]),
+            clean=data["clean"],
+        )
+
+
+def bootstrap(from_ctx: Context, settings_data: Optional[dict]=None) -> str:
     """ Bootstraps a Python virtualenv that we can operate out of.
         Returns a path to the bootstrapped venv's Python.
     """
 
-    if settings is None:
-        settings = Settings()
+    settings = Settings.deserialize(settings_data or {})
 
     # So... for some reason, Mitogen(!?) modifies sys._base_executable which breaks venv.
     # Set it to sys.executable temporarily.
