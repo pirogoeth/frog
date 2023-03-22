@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 
 import json
+from functools import partial
 from pprint import pformat
 from typing import Any, Callable, List, Mapping, Union
 
 from texttable import Texttable
 
 from frog.execution import ExecutionResult, ResultChain
+from frog.util.dictser import DictSerEncoder
 
 ResultType = Union[ExecutionResult, ResultChain]
+
+_json_dumps = partial(json.dumps, cls=DictSerEncoder)
 
 
 def as_json(results: List[ResultType]) -> str:
@@ -17,7 +21,7 @@ def as_json(results: List[ResultType]) -> str:
     for result in results:
         out.update({result.host.host: result.outcome_list()})
 
-    return json.dumps(out)
+    return _json_dumps(out)
 
 
 def as_texttable(results: List[ResultType]) -> str:
@@ -40,7 +44,7 @@ def as_pretty_json(results: List[ResultType]) -> str:
     for result in results:
         out.update({result.host.host: result.outcome_list()})
 
-    return json.dumps(out, indent=2)
+    return _json_dumps(out, indent=2)
 
 
 def as_pprint(results: List[ResultType]) -> str:

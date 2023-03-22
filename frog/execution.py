@@ -3,11 +3,37 @@
 from __future__ import annotations
 
 import functools
+import logging
 from typing import Any, Callable, Iterable, List, Mapping, Optional
 
 from frog import context
 from frog.inventory import InventoryItem
 from frog.util.dictser import DictDeserializable, DictSerializable
+
+import better_exceptions
+
+
+class CapturedException(Exception):
+    """ This wraps an exception that was captured during remote execution.
+    """
+
+    def __init__(self, name: str, repr: str):
+        self._name = name
+        self._repr = repr
+
+    @property
+    def captured_name(self) -> str:
+        return self._name
+
+    @property
+    def captured_repr(self) -> str:
+        return self._repr
+
+    def __repr__(self) -> str:
+        return f"<CapturedException[{self._name}]>"
+
+    def __str__(self) -> str:
+        return f"CapturedException: {self._name}\n{self._repr}"
 
 
 class ExecutionResult(DictSerializable, DictDeserializable):
@@ -38,6 +64,7 @@ class ExecutionResult(DictSerializable, DictDeserializable):
                 "name": type(exc).__name__,
                 "repr": repr(exc),
                 "args": exc.args,
+                "details": better_exceptions.format_exception(type(exc), exc, exc.__traceback__)
             },
             **kw
         ))
@@ -46,8 +73,6 @@ class ExecutionResult(DictSerializable, DictDeserializable):
     def deserialize(cls, data: dict) -> ExecutionResult:
         if "results" in data:
             return ResultChain.deserialize(data)
-
-        print(data)
 
         return cls(
             host=InventoryItem.deserialize(data["host"]),
@@ -87,7 +112,7 @@ class ExecutionResult(DictSerializable, DictDeserializable):
             return self._success
         else:
             exc = self._failure
-            raise Exception(f"Captured exception: {exc['name']} {exc['repr']}")
+            raise CapturedException(exc["name"], exc["repr"])
 
 
 class ResultChain(DictSerializable, DictDeserializable):
@@ -98,9 +123,6 @@ class ResultChain(DictSerializable, DictDeserializable):
     def deserialize(cls, data: dict) -> ExecutionResult:
         if "host" in data and any(["success" in data, "failure" in data]):
             return ExecutionResult.deserialize(data)
-
-        from pprint import pformat
-        print(f"deserialize ResultChain {pformat(data)}")
 
         return cls(
             host=InventoryItem.deserialize(data["host"]),
@@ -125,8 +147,15 @@ class ResultChain(DictSerializable, DictDeserializable):
         for result in self._results:
             yield result.asdict()
 
-    def outcome_list(self) -> List[Iterable[Mapping[str, Any]]]:
+    def outcome_list(self) -> List[Mapping[str, Any]]:
         return list(self.outcome())
+
+    def unwrap_outcome(self) -> Optional[Iterable[Any]]:
+        for result in self._results:
+            yield result.unwrap()
+
+    def unwrap_outcome_list(self) -> List[Any]:
+        return list(self.unwrap_outcome())
 
     def asdict(self):
         return {"host": self.host, "results": self._results}

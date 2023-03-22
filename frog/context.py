@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from mitogen.core import Context
 
@@ -33,6 +34,7 @@ def call_with_context(_inventory: dict, _host: dict, _context: Context, _parent:
     # that need to be resolved.
     thunk = (resources.lookup(target))(**kw)
     try:
-        return thunk.execute().serialize()
+        result = thunk.execute()
+        return result.serialize()
     except Exception as err:
         return ExecutionResult.fail(err).serialize()
